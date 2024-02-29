@@ -1,11 +1,3 @@
-# pip install -r requirements.txt
-
-# First, determine AABB coordinates & thresholds:
-# python ocr.py --test_file test/frame1.jpg --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765
-
-# Then run:
-# OPENCV_FFMPEG_READ_ATTEMPTS=100000 python ocr.py --movie movie.mp4 --sheet input.xlsx --output ./output --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765
-
 import argparse
 import time
 import itertools
@@ -51,8 +43,8 @@ def count_text_candidates(img, conf):
     #https://github.com/gifflet/opencv-text-detection/tree/master
     #https://github.com/songdejia/EAST
 
-    #image = img[cropy[0]:cropy[1], cropx[0]:cropx[1]]
-    image = img[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
+    #image = img[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
+    image = img[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
 
     # set the new width and height and then determine the ratio in change
     # for both the width and height
@@ -118,10 +110,11 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
         if video_frame_nr / conf["movie_sample_rate"] != float(video_frame_nr // conf["movie_sample_rate"]):
            continue
 
-        img_cropped, match_count = count_text_candidates(frame, conf)
+        img_cropped_names, match_count = count_text_candidates(frame, conf)
         if match_count > conf["east_threshold"]:
+            img_cropped = frame[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
             capture_frame_nr += 1
-            img_cropped_names = frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+            #img_cropped_names = frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
             #img_cropped_scores = frame[conf["aabb_scores_y1"]:conf["aabb_scores_y2"], conf["aabb_scores_x1"]:conf["aabb_scores_x2"]]
             img_cropped_scores = None
             candidate_frames.append(Frame(frame, img_cropped, img_cropped_names, img_cropped_scores, capture_frame_nr, video_frame_nr, video_frame_nr//fps, match_count))
@@ -132,7 +125,7 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
             cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-names.jpg", img_cropped_names)
             #cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-scores.jpg", img_cropped_scores)
 
-            print("CANDIDATE FRAME FOUND: ",video_frame_nr,match_count, video_frame_nr / fps)
+            print("CANDIDATE FRAME FOUND: ",video_frame_nr,match_count, video_frame_nr / fps, f"{(video_frame_nr / fps)/60} min")
 
     print(f"ANALYZED {video_frame_nr} frames ({video_frame_nr//fps} seconds of video) with {len(candidate_frames)} candidates")
     return candidate_frames
@@ -190,17 +183,20 @@ conf["east_network"] = cv.dnn.readNet(conf["east_model"])
 
 # Test a single frame to find thresholds
 if params["test_file"]:
-    frame = cv.imread(params["test_file"])
-    #image = frame[aabb[1]:aabb[3], aabb[0]:aabb[2]]
-    #cv.imwrite("testtt.jpg", image)
-    img_cropped, match_count = count_text_candidates(frame, conf)
+    test_frame = cv.imread(params["test_file"])
+    if test_frame is None:
+        raise Exception(f"Test frame {params['test_file']} not found")
+
+    img_cropped, match_count = count_text_candidates(test_frame, conf)
     print("Detection count (to set as guestimate): ", match_count)
     cv.imwrite("aabb.jpg", img_cropped)
+    img_cropped_names = test_frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+    cv.imwrite("aabb-names.jpg", img_cropped_names)
     exit(1)
 
 players = []
 player_scores = {}
-pos_scores = [13,11,9,8,7,6,5,4,3,2,1]
+pos_scores = [13,11,9,8,7,6,5,4,3,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 
 # Parse initial input (player names, scores
 
@@ -223,9 +219,6 @@ while player_rec.value and cx < 100:
     score_rec = config_sheet.cell(row=cx, column=2)
 print("\n")
 
-#players = [xx.strip() for xx in params["players"].split()]
-#players = [xx.strip() for xx in params["players"].split()]
-#player_scores = {x:conf["start_score"].get(x, 0) for x in players}
 
 # As a preprocessing step, we jump through frames and apply text detection using the EAST text model
 start = time.time()
@@ -234,9 +227,6 @@ with open_cv_video(conf["movie_file"]) as cap:
 end = time.time()
 print("\nCandidate sampling took {:.2f} seconds\n".format(end - start))
 frames = [x.img_names for x in candidate_frames]
-#frames = [cv.imread('./0-names.jpg'),]
-
-#frames = [cv.imread('./0-names.jpg'),cv.imread('./1-names.jpg'),cv.imread('./2-names.jpg'),cv.imread('./3-names.jpg'),cv.imread('./4-names.jpg')]
 
 # Then we apply text recognition on these candidate images
 #https://keras-ocr.readthedocs.io/en/latest/
