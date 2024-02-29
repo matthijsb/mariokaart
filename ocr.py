@@ -1,9 +1,9 @@
-# pip install requirements.txt
+# pip install -r requirements.txt
 
-# To test AABB coordinates & thresholds:
+# First, determine AABB coordinates & thresholds:
 # python ocr.py --test_file test/frame1.jpg --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765
 
-# To run:
+# Then run:
 # OPENCV_FFMPEG_READ_ATTEMPTS=100000 python ocr.py --movie movie.mp4 --sheet input.xlsx --output ./output --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765
 
 import argparse
