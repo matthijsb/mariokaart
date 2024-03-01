@@ -43,8 +43,8 @@ def count_text_candidates(img, conf):
     #https://github.com/gifflet/opencv-text-detection/tree/master
     #https://github.com/songdejia/EAST
 
-    #image = img[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
-    image = img[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+    image = img[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
+    #image = img[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
 
     # set the new width and height and then determine the ratio in change
     # for both the width and height
@@ -110,11 +110,12 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
         if video_frame_nr / conf["movie_sample_rate"] != float(video_frame_nr // conf["movie_sample_rate"]):
            continue
 
-        img_cropped_names, match_count = count_text_candidates(frame, conf)
+        img_cropped, match_count = count_text_candidates(frame, conf)
         if match_count > conf["east_threshold"]:
-            img_cropped = frame[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
+            #import pdb;pdb.set_trace()
+            #img_cropped = frame[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
             capture_frame_nr += 1
-            #img_cropped_names = frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+            img_cropped_names = frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
             #img_cropped_scores = frame[conf["aabb_scores_y1"]:conf["aabb_scores_y2"], conf["aabb_scores_x1"]:conf["aabb_scores_x2"]]
             img_cropped_scores = None
             candidate_frames.append(Frame(frame, img_cropped, img_cropped_names, img_cropped_scores, capture_frame_nr, video_frame_nr, video_frame_nr//fps, match_count))
@@ -180,7 +181,6 @@ conf = {
 # load the pre-trained EAST text detector
 conf["east_network"] = cv.dnn.readNet(conf["east_model"])
 
-
 # Test a single frame to find thresholds
 if params["test_file"]:
     test_frame = cv.imread(params["test_file"])
@@ -193,6 +193,7 @@ if params["test_file"]:
     img_cropped_names = test_frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
     cv.imwrite("aabb-names.jpg", img_cropped_names)
     exit(1)
+
 
 players = []
 player_scores = {}
@@ -334,7 +335,7 @@ for idx, prediction_result in enumerate(prediction_groups):
                 "delta": delta,
                 "ocr": ocr_match,
             }
-            print(f"Add {matched_name} - {x} - score: {score} - ocr: {x} {ocr_results[x]} - matches: {fuzzy_results}")
+            print(f"Linked ocr {ocr_results[x]} to {matched_name} - {x} - score: {score} - fuzzies: {fuzzy_results}")
 
             if score == 100:
                 possible_names.remove(matched_name)
@@ -378,6 +379,12 @@ for idx, prediction_result in enumerate(prediction_groups):
     img = openpyxl.drawing.image.Image(f"{conf['frame_dir']}/{idx}-aabb.jpg")
     img.anchor = 'D1'
     worksheet.add_image(img)
+
+# Update scores in output excel to serve as new input for the next ocr round
+for x in range(len(player_scores.keys())):
+    player_name = config_sheet.cell(row=2+x, column=1).value.strip().lower()
+    player_score = player_scores[player_name]
+    config_sheet[f"B{2+x}"] = player_score
 
 config_sheet["C2"] = nr_prev_games_parsed+idx+1
 workbook.save(f'{params["output"]}/output.xlsx')
