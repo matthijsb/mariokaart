@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 
 import os
-os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = 100000
+os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = "100000"
 
 
 # define the two output layer names for the EAST detector model that
