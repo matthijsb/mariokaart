@@ -10,6 +10,10 @@ from thefuzz import process as fuzzy_match
 from contextlib import contextmanager
 
 
+import os
+os.environ["OPENCV_FFMPEG_READ_ATTEMPTS"] = 100000
+
+
 # define the two output layer names for the EAST detector model that
 # we are interested -- the first is the output probabilities and the
 # second can be used to derive the bounding box coordinates of text
@@ -88,7 +92,7 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
     candidate_frames = []
     video_frame_nr = -1
     capture_frame_nr = -1
-    fast_forward = -1
+    #fast_forward = -1
     fps = int(video_capture.get(cv.CAP_PROP_FPS))
 
     while video_capture.isOpened():
@@ -101,30 +105,43 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
         # if video_frame_nr > 2000:
         #     break
 
-        if fast_forward > -1:
-            if video_frame_nr < fast_forward:
-                continue
-            else:
-                fast_forward = -1
+        # if fast_forward > -1:
+        #     if video_frame_nr < fast_forward:
+        #         continue
+        #     else:
+        #         fast_forward = -1
 
         if video_frame_nr / conf["movie_sample_rate"] != float(video_frame_nr // conf["movie_sample_rate"]):
            continue
 
         img_cropped, match_count = count_text_candidates(frame, conf)
         if match_count > conf["east_threshold"]:
-            #import pdb;pdb.set_trace()
             #img_cropped = frame[conf["aabb_y1"]:conf["aabb_y2"], conf["aabb_x1"]:conf["aabb_x2"]]
             capture_frame_nr += 1
             img_cropped_names = frame[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
             #img_cropped_scores = frame[conf["aabb_scores_y1"]:conf["aabb_scores_y2"], conf["aabb_scores_x1"]:conf["aabb_scores_x2"]]
             img_cropped_scores = None
+
+            # get some frames around this point
+            # video_capture.set(cv.CAP_PROP_POS_FRAMES, video_frame_nr - fps*2)
+            # res, pframe = video_capture.read()
+            # img_cropped_names_before = pframe[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+            # video_capture.set(cv.CAP_PROP_POS_FRAMES, video_frame_nr + fps*2)
+            # res, nframe = video_capture.read()
+            # img_cropped_names_after = nframe[conf["aabb_names_y1"]:conf["aabb_names_y2"], conf["aabb_names_x1"]:conf["aabb_names_x2"]]
+
             candidate_frames.append(Frame(frame, img_cropped, img_cropped_names, img_cropped_scores, capture_frame_nr, video_frame_nr, video_frame_nr//fps, match_count))
-            fast_forward = video_frame_nr + fps*10
 
             cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}.jpg", frame)
             cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-aabb.jpg", img_cropped)
             cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-names.jpg", img_cropped_names)
+            # cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-names-before.jpg", img_cropped_names)
+            # cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-names-after.jpg", img_cropped_names)
             #cv.imwrite(f"{conf['frame_dir']}/{capture_frame_nr}-scores.jpg", img_cropped_scores)
+
+            #fast_forward = video_frame_nr + fps*10
+            video_capture.set(cv.CAP_PROP_POS_FRAMES, video_frame_nr + fps*10)
+            video_frame_nr += fps * 10
 
             print("CANDIDATE FRAME FOUND: ",video_frame_nr,match_count, video_frame_nr / fps, f"{(video_frame_nr / fps)/60} min")
 
@@ -251,6 +268,8 @@ for idx, prediction_result in enumerate(prediction_groups):
     ocr_results = [x[0] for x in prediction_result]
     print(f"OCR results: {ocr_results}")
     if len(ocr_results) < len(players):
+        print("ocr results: ", ocr_results)
+        print("all players: ", players)
         raise Exception(f"ERROR: OCR results < PLAYER COUNT")
 
     possible_names = set(players)
@@ -364,6 +383,8 @@ for idx, prediction_result in enumerate(prediction_groups):
             pname = rank["name"]
             print(rank["pos"], pname, player_scores[pname])#, pos_scores[rank["pos"] - 1], player_scores[pname] + pos_scores[rank["pos"] - 1])
 
+        print("matched players: ", rankings)
+        print("all players: ", players)
         raise Exception(f"NOT ALL PLAYERS HAVE BEEN MATCHED {len(rankings)} < {len(players)}")
 
 
