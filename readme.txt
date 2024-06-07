@@ -2,24 +2,25 @@ First install required dependencies:
     pip install -r requirements.txt
 (Or use something like anaconda)
 
+sudo apt install nvidia-cuda-toolkit
+
 Initially make sure you update the input.xlsx with all player names
 
-Next determine the AABB coordinates for the frame and names and determine the confidence threshold:
-    For the demo video:
-    python ocr.py --test_file input-demo/none1.jpg --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765 --east_detection_threshold=150 --movie none --sheet none
-
-    For the videos from erik:
-    python ocr.py --test_file input-erik/none8.jpg --aabb 896,288,1340,804 --aabb_names 984,288,1160,787 --east_detection_threshold=150 --movie none --sheet none
+Next determine the AABB coordinates for the frame and names and determine the confidence threshold, the AABBs for the names, scores and level name should be determined and provided:
+    python run.py --action test --openai_key ??? --input_movie ./movie.mkv --input_sheet ./input.xlsx --output_sheet ./finals.xlsx --output_frames_dir ./test-track --aabb_names 435,70,570,650 --aabb_scores 820,70,860,650 --aabb_track 400,625,900,675 --threshold_names=0 --threshold_scores=0 --threshold_track=0
 
 Then run the OCR to xlsx extraction:
-    For the demo video:
-    python ocr.py --movie ./input-demo/demo.mp4 --aabb 1325,400,1750,800 --aabb_names 1400,410,1566,765 --east_detection_threshold=150 --sheet ./input-demo/input.xlsx --output ./output-demo
-
-    For the video from erik:
-    python ocr.py --movie ./input-erik/movie1.mp4 --sheet ./input-erik/input.xlsx --output ./output-erik --aabb 896,288,1340,804 --aabb_names 984,288,1160,787 --east_detection_threshold=200
+    python run.py --action run --openai_key ??? --input_movie ./movie.mkv --input_sheet ./input.xlsx --output_sheet ./finals.xlsx --output_frames_dir ./winnaars --aabb_names 435,70,570,650 --aabb_scores 820,70,860,650 --aabb_track 400,625,900,675 --threshold_names=6 --threshold_scores=4 --threshold_track=0.6
 
 Result will be written to the OUTPUT_DIRECTORY/output.xlsx
 This file can serve as new input for the next round of OCR on a new video fragment to stich them together.
 
+Cross check the results/tracks if there arent any invalid tracknames, delete them if so, when false positives are found check the thresholds and/or sample_rate
+
 * Note: OPENCV_FFMPEG_READ_ATTEMPTS=100000 might note be required, or might need a different value depending on your OS / hardware capabilities
 
+
+
+TODO:
+    timestamp opslaan op sheets -> beter nog, sla op in een sqllite db
+    bij de levelnaam check -> check de timestamp per sheet om te plaatsen

@@ -1,7 +1,7 @@
 tensorflow[and-cuda]==2.15.0.post1
 opencv-python==4.9.0.80
-keras-ocr@git+https://github.com/faustomorales/keras-ocr.git@e8d34a46f07d50158e1d86d6c617e99bfe99e2f8
-#XlsxWriter==3.2.0
+#opencv-python-headless==4.8.1.78
+opencv-python-headless==4.9.0.80
 openpyxl==3.1.2
 pillow==10.2.0
-thefuzz==0.22.1
+easyocr==1.7.1
