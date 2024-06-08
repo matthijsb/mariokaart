@@ -1,4 +1,3 @@
-import numpy as np
 import re
 import os
 import base64
@@ -10,8 +9,9 @@ import base64
 import requests
 import traceback
 
+import cv2
+import numpy as np
 import easyocr
-import cv2 as cv
 import openpyxl
 import openai
 
@@ -67,7 +67,7 @@ class GPTWrapper:
 
 @contextmanager
 def open_cv_video(filepath):
-    cap = cv.VideoCapture(filepath)
+    cap = cv2.VideoCapture(filepath)
     try:
         yield cap
     finally:
@@ -87,27 +87,34 @@ def match_track(res):
     return max([SequenceMatcher(None, rez, x).ratio() for x in track_names])
 
 def matched_candidates(img, x1, y1, x2, y2, match_func):
-    #todo: count_matched_candidates
     image = img[y1:y2, x1:x2]
-    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-    ocr = conf["ocr"].readtext(image, detail=0)
-    # from paddleocr import PaddleOCR
-    # ocr = PaddleOCR(use_angle_cls=True, lang='en')
-    # result = ocr.ocr(image)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # import pytesseract
-    # thr = cv2.adaptiveThreshold(gry, 255, cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY_INV, 59, 88)
-    # bnt = cv2.bitwise_not(thr)
-    # txt = pytesseract.image_to_string(gry, config="--psm 6 digits")
+    #ocr = conf["ocr"].readtext(image, detail=0)
+    #https://github.com/JaidedAI/EasyOCR/issues/341#issuecomment-2044059424
+    scale_factor = 2
+    upscaled = cv2.resize(image, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_LINEAR)
+    blur = cv2.blur(upscaled, (5, 5))
+    #ocr = conf["ocr"].readtext(blur , detail=0, text_threshold=0.3) #, allowlist='0123456789'
+    ocr = conf["ocr"].readtext(blur , detail=0)
 
     return image, match_func(ocr), ocr
 
-def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
+def analyze_frames(video_capture, conf):
     nr_candidates = 0
-    track_frame = -1
     video_frame_nr = -1
-    fps = int(video_capture.get(cv.CAP_PROP_FPS))
-    sample_rate = conf["movie_sample_rate"] or fps
+    #fps = int(video_capture.get(cv2.CAP_PROP_FPS))
+    fps = video_capture.get(cv2.CAP_PROP_FPS)
+    #sample_rate = conf["movie_sample_rate"] or fps
+
+    next_score_ms = 99999999999999999999999
+    next_track_ms = -1   # Note: we assume to start with checking for tracks
+    last_score_ms = -1
+    last_track_ms = -1
+    track_detected = False
+    score_detected = False
+    score_best = -1
+    track_best = -1
 
     while video_capture.isOpened():
         ret, frame = video_capture.read()
@@ -115,37 +122,73 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
             break
 
         video_frame_nr += 1
-        secs = video_frame_nr//fps
+        msecs = int(video_capture.get(cv2.CAP_PROP_POS_MSEC)) #video_frame_nr//fps
+        secs = int(msecs / 1000)
 
         if conf["movie_start"] and secs < conf["movie_start"]:
             continue
         elif conf["movie_start"] and secs == conf["movie_start"]:
             print(f"MOVIE START ({conf['movie_start']} secs) reached (framenr {video_frame_nr})")
-
+            conf["movie_start"] = -conf["movie_start"]
         if conf["movie_end"] and secs >= conf["movie_end"]:
             print(f"MOVIE END ({conf['movie_end']} secs) reached  (framenr {video_frame_nr})")
             break
 
-        if video_frame_nr / sample_rate != float(video_frame_nr // sample_rate):
-           continue
+        if msecs > next_score_ms:
 
-        candidate_found = False
-        img_cropped_scores, match_count_scores, ocr = matched_candidates(frame, conf["aabb_scores_x1"], conf["aabb_scores_y1"], conf["aabb_scores_x2"], conf["aabb_scores_y2"], match_scores)
-        if match_count_scores >= conf["threshold_scores"]:
-            img_cropped_names, match_count_names, ocr = matched_candidates(frame, conf["aabb_names_x1"], conf["aabb_names_y1"], conf["aabb_names_x2"], conf["aabb_names_y2"], match_names)
-            if match_count_names >= conf["threshold_names"]:
-                #print(f"writing: {conf['frame_dir']}/{video_frame_nr // fps}.jpg")
-                cv.imwrite(f"{conf['frame_dir']}/{video_frame_nr // fps}.jpg", frame)
-                cv.imwrite(f"{conf['frame_dir']}/{video_frame_nr // fps}-names.jpg", img_cropped_names)
-                cv.imwrite(f"{conf['frame_dir']}/{video_frame_nr // fps}-scores.jpg", img_cropped_scores)
-                print("CANDIDATE SCORE FRAME FOUND: ", video_frame_nr, match_count_names, match_count_scores, f"{conf['frame_dir']}/{video_frame_nr // fps}.jpg")
-                nr_candidates+=1
+            if score_detected and msecs - last_score_ms > 10 * 1000:
+                # after 10 secs we give up and continue to check for scores
+                next_track_ms = msecs + 10 * 1000
+                next_score_ms = msecs + 100 * 1000
+                score_detected = False
+                score_best = -1
+                #print("10secs timeout, next!!!")
 
-        if not candidate_found:
+            img_cropped_scores, match_count_scores, ocr = matched_candidates(frame, conf["aabb_scores_x1"], conf["aabb_scores_y1"], conf["aabb_scores_x2"], conf["aabb_scores_y2"], match_scores)
+            if match_count_scores >= conf["threshold_scores"]:
+
+                img_cropped_names, match_count_names, ocr = matched_candidates(frame, conf["aabb_names_x1"], conf["aabb_names_y1"], conf["aabb_names_x2"], conf["aabb_names_y2"], match_names)
+                if match_count_names >= conf["threshold_names"]:
+
+                    scoree = min(match_count_scores,12) + min(match_count_names,12)
+                    if (scoree) < score_best:
+                        continue
+
+                    score_best = scoree
+
+                    if msecs - last_score_ms > 90*1000:
+                        # Found a new first score candidate
+                        last_score_ms = msecs
+                        #print("first hit, set new lastscore ts")
+
+                    #print(f"writing: {conf['frame_dir']}/{video_frame_nr // fps}.jpg")
+                    cv2.imwrite(f"{conf['frame_dir']}/{msecs}.jpg", frame)
+                    cv2.imwrite(f"{conf['frame_dir']}/{msecs}-names.jpg", img_cropped_names)
+                    cv2.imwrite(f"{conf['frame_dir']}/{msecs}-scores.jpg", img_cropped_scores)
+                    print("CANDIDATE SCORE FRAME FOUND: ", video_frame_nr, match_count_names, match_count_scores, f"{conf['frame_dir']}/{video_frame_nr // fps}.jpg")
+                    nr_candidates+=1
+
+                    next_score_ms = msecs + 1 * 1000
+                    score_detected = True
+
+        elif msecs > next_track_ms:
+
+            if track_detected and msecs - last_track_ms > 10 * 1000:
+                # after 10 secs we give up and continue to check for scores
+                next_track_ms = msecs + 100 * 1000
+                next_score_ms = msecs + 90 * 1000
+                track_detected = False
+                track_best = -1
+
             # check if we find a track
             img_cropped_track, match_count_track, ocr = matched_candidates(frame, conf["aabb_track_x1"], conf["aabb_track_y1"], conf["aabb_track_x2"], conf["aabb_track_y2"], match_track)
 
             if match_count_track >= conf["threshold_track"]:
+
+                if match_count_track <= track_best:
+                    continue
+
+                track_best = min(match_count_track,12)
 
                 rez = " ".join(ocr)
                 best_match=0
@@ -157,16 +200,21 @@ def analyze_frames(video_capture, conf):#sample_rate, east_threshold):
                         trackname = trax
 
                 track_name = base64.b64encode(trackname.encode()).decode('ascii')
-                ff=f"{conf['frame_dir']}/tracks/{video_frame_nr // fps}-track-{track_name}.jpg"
-                cv.imwrite(f"{conf['frame_dir']}/tracks/{video_frame_nr // fps}.jpg", frame)
-                cv.imwrite(ff, img_cropped_track)
+                ff=f"{conf['frame_dir']}/tracks/{msecs}-track-{track_name}.jpg"
+                cv2.imwrite(f"{conf['frame_dir']}/tracks/{msecs}.jpg", frame)
+                cv2.imwrite(ff, img_cropped_track)
 
-                print("CANDIDATE TRACK FRAME FOUND: ", video_frame_nr, match_count_track, f"{conf['frame_dir']}/tracks/{video_frame_nr // fps}.jpg")
+                track_detected = True
+                print("CANDIDATE TRACK FRAME FOUND: ", video_frame_nr, trackname, match_count_track, f"{conf['frame_dir']}/tracks/{msecs}.jpg")
 
-                video_frame_nr += fps * 60
-                video_capture.set(cv.CAP_PROP_POS_FRAMES, video_frame_nr)
+                if msecs - last_track_ms > 90 * 1000:
+                    # Found a new first track candidate
+                    last_track_ms = msecs
 
-    print(f"ANALYZED {video_frame_nr} frames ({video_frame_nr//fps} seconds of video)")
+                next_track_ms = msecs + 1 * 1000
+
+
+    print(f"ANALYZED {video_frame_nr} frames ({secs} seconds of video)")
     return nr_candidates
 
 
@@ -313,24 +361,27 @@ if __name__ == "__main__":
         for root, _, files in os.walk(conf['frame_dir']):
             #files.sort(key=lambda f: int(re.sub('\D', '', f[:f.find('-')])))
             for filename in files:
-                prefix_names = filename.find("-names.jpg")
-                prefix_scores = filename.find("-scores.jpg")
+                prefix_names = filename.find("-names")
+                prefix_scores = filename.find("-scores")
                 # only consider full screen capture frames
                 if prefix_names > -1 or prefix_scores > -1:
+                    print(f"skip {filename}")
                     continue
 
                 filenamef = f"{conf['frame_dir']}/{filename}"
-                frame = cv.imread(filenamef)
+                frame = cv2.imread(filenamef)
 
                 print(filename)
-                #img, score = matched_candidates(frame, conf["aabb_track_x1"], conf["aabb_track_y1"], conf["aabb_track_x2"], conf["aabb_track_y2"], match_track)
+                img, score, ocr = matched_candidates(frame, conf["aabb_track_x1"], conf["aabb_track_y1"], conf["aabb_track_x2"], conf["aabb_track_y2"], match_track)
+                print("track", score, ocr)
+                cv2.imwrite(f"{conf['frame_dir']}/{filename}".replace(".png", "-track.png"), img)
                 img, score, ocr = matched_candidates(frame, conf["aabb_names_x1"], conf["aabb_names_y1"], conf["aabb_names_x2"], conf["aabb_names_y2"], match_names)
-                print(score,ocr)
-                #cv.imwrite(f"{conf['frame_dir']}/{filename}".replace(".jpg", "-names.jpg"), img)
-                #img, score, ocr = matched_candidates(frame, conf["aabb_scores_x1"], conf["aabb_scores_y1"], conf["aabb_scores_x2"], conf["aabb_scores_y2"], match_scores)
-                #print(score, ocr)
-                cv.imwrite(f"{conf['frame_dir']}/{filename}".replace(".png","-names.png"), img)
-                print(f"{filenamef}: {score}")
+                print("names", score, ocr)
+                cv2.imwrite(f"{conf['frame_dir']}/{filename}".replace(".png","-names.png"), img)
+                img, score, ocr = matched_candidates(frame, conf["aabb_scores_x1"], conf["aabb_scores_y1"], conf["aabb_scores_x2"], conf["aabb_scores_y2"], match_scores)
+                print("scores", score, ocr)
+                cv2.imwrite(f"{conf['frame_dir']}/{filename}".replace(".png","-scores.png"), img)
+                print(f"{filenamef}: {score}\n\n")
 
             exit(1)
 
@@ -338,7 +389,7 @@ if __name__ == "__main__":
         # As a preprocessing step, we jump through frames and apply text detection using the EAST text model
         start = time.time()
         with open_cv_video(conf["movie_file"]) as cap:
-            candidate_frames = analyze_frames(cap, conf)  # sample_rate, 100)
+            candidate_frames = analyze_frames(cap, conf)
         end = time.time()
         print("\nFound {} candidates (took {:.2f} seconds)\n".format(candidate_frames, end - start))
 
@@ -406,7 +457,6 @@ if __name__ == "__main__":
                     worksheet[f"A{rank + 1}"] = pname
                     worksheet[f"B{rank + 1}"] = player_scores[pname]
 
-
                 image_path = filename.replace("-names", "")
                 img = openpyxl.drawing.image.Image(image_path)
                 img.anchor = 'D2'
@@ -421,25 +471,30 @@ if __name__ == "__main__":
         for idx, (pl_name, pl_score) in enumerate(sorted_players.items()):
             config_sheet[f"A{2+idx}"] = pl_name
             config_sheet[f"B{2+idx}"] = pl_score
-        config_sheet["C2"] = nr_prev_games_parsed+screen_idx-1
+        config_sheet["C2"] = nr_prev_games_parsed+screen_idx
 
         workbook.save(f'{params["output_sheet"]}')
         print(f'saved score results to {params["output_sheet"]}')
 
     if action == "tracks" or action == "run":
 
+        workbook = openpyxl.load_workbook(f'{params["output_sheet"]}')
         sheet_nr = 1
         for root, _, files in os.walk(conf['frame_dir']+"/tracks"):
             files.sort(key=lambda f: int(re.sub('\D', '', f[:f.find('-')])))
             sheet_idx = 1
+            last_trackname = ""
             for filename in files:
                 raw_filename = filename
                 if filename.find('-track-') > -1:
                     ext_idx = filename.index('.jpg')
-                    print(f"parse track {filename}")
                     trackname = filename[filename.index('-track-')+7:ext_idx]
                     trackname = base64.b64decode(trackname).decode("utf-8", "ignore")
+                    if trackname == last_trackname:
+                        continue
 
+                    print(f"parse track {filename} : {trackname}  -> sheet {sheet_nr}")
+                    last_trackname = trackname
                     worksheet = workbook.worksheets[sheet_nr]
                     worksheet[f"D1"] = trackname
                     print("add ", trackname)

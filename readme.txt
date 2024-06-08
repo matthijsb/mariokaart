@@ -22,5 +22,5 @@ Cross check the results/tracks if there arent any invalid tracknames, delete the
 
 
 TODO:
-    timestamp opslaan op sheets -> beter nog, sla op in een sqllite db
-    bij de levelnaam check -> check de timestamp per sheet om te plaatsen
+sla resultst op in sqllite db, daarop queryen -> minder llm queries nodig
+bij de levelnaam check -> check de timestamp per sheet om te plaatsen
